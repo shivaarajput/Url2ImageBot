@@ -9,6 +9,10 @@ TELEGRAM_API_URL = f'https://api.telegram.org/bot{TOKEN}/'
 
 app = Flask(__name__)
 
+# Ensure a writable directory for downloading videos
+DOWNLOAD_DIR = '/tmp/videos'
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
 def send_message(chat_id, text):
     url = TELEGRAM_API_URL + 'sendMessage'
     payload = {
@@ -19,16 +23,16 @@ def send_message(chat_id, text):
 
 def send_video(chat_id, video_path):
     url = TELEGRAM_API_URL + 'sendVideo'
-    files = {'video': open(video_path, 'rb')}
-    payload = {
-        'chat_id': chat_id
-    }
-    requests.post(url, data=payload, files=files)
+    with open(video_path, 'rb') as video_file:
+        files = {'video': video_file}
+        payload = {'chat_id': chat_id}
+        response = requests.post(url, data=payload, files=files)
+    return response
 
 def download_video(url):
     ydl_opts = {
         'format': 'best',
-        'outtmpl': 'downloaded_video.%(ext)s',
+        'outtmpl': os.path.join(DOWNLOAD_DIR, 'downloaded_video.%(ext)s'),
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info_dict = ydl.extract_info(url, download=True)
@@ -55,8 +59,11 @@ def webhook():
                 video_url = match.group()
                 try:
                     video_path = download_video(video_url)
-                    send_video(chat_id, video_path)
+                    response = send_video(chat_id, video_path)
                     os.remove(video_path)  # Clean up after sending the video
+
+                    if response.status_code != 200:
+                        send_message(chat_id, f'Failed to send the video: {response.text}')
                 except Exception as e:
                     send_message(chat_id, f'Failed to download or send the video: {e}')
             else:
@@ -66,7 +73,7 @@ def webhook():
 
 @app.route('/')
 def index():
-    return "The bot is running..."
+    return "The bot is running ..."
 
 if __name__ == '__main__':
     app.run(port=8080)
